@@ -1,22 +1,48 @@
-obj-m += tide_kernel_module.o
-KERNEL_DIR ?= /lib/modules/$(shell uname -r)/build
+# eBPF Program Compilation Makefile
 CLANG ?= clang
 LLC ?= llc
+ARCH ?= $(subst x86_64,x86,$(shell uname -m))
+KDIR ?= /lib/modules/$(shell uname -r)/build
+BPF_TARGET = bpf
+BIN = tide_kern.o
 
-all: ebpf_probe.o tide_kernel_module.ko
+# Architecture-specific flags
+CLANG_ARCH_FLAGS := -D__TARGET_ARCH_$(ARCH)
+CLANG_FLAGS = -g -O2 -Wall -Werror \
+    -target $(BPF_TARGET) \
+    -nostdinc \
+    -I$(KDIR)/arch/$(ARCH)/include \
+    -I$(KDIR)/arch/$(ARCH)/include/generated \
+    -I$(KDIR)/include \
+    -I$(KDIR)/arch/$(ARCH)/include/uapi \
+    -I$(KDIR)/include/uapi \
+    -I$(KDIR)/include/generated/uapi \
+    -I./include \
+    -include $(KDIR)/include/linux/kconfig.h \
+    -D__KERNEL__ \
+    -D__BPF_TRACING__ \
+    $(CLANG_ARCH_FLAGS) \
+    -Wno-gnu-variable-sized-type-not-at-end \
+    -Wno-address-of-packed-member \
+    -Wno-tautological-compare \
+    -Wno-unknown-warning-option
 
-tide_kernel_module.ko: tide_kernel_module.c
-	make -C $(KERNEL_DIR) M=$(PWD) modules
+all: $(BIN)
 
-ebpf_probe.o: ebpf_probe.c
-	$(CLANG) -target bpf -O2 -Wall -c $< -o $@
+# Compile multiple eBPF C files into single object
+$(BIN): ebpf_probe.c tide_memory.c
+	$(CLANG) $(CLANG_FLAGS) -c $^ -o combined.bc
+	$(LLC) -march=bpf -mcpu=probe -filetype=obj -o $@ combined.bc
+	rm -f combined.bc
 
 clean:
-	make -C $(KERNEL_DIR) M=$(PWD) clean
-	rm -f ebpf_probe.o
+	rm -f $(BIN) *.bc
 
-load:
-	sudo insmod tide_kernel_module.ko
+# Helper targets
+debug:
+	$(CLANG) -S $(CLANG_FLAGS) -c ebpf_probe.c -o - | llvm-mca
 
-unload:
-	sudo rmmod tide_kernel_module
+vmlinux:
+	bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
+
+.PHONY: all clean debug vmlinux

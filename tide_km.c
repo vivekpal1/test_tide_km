@@ -9,8 +9,8 @@
 #include <linux/ptrace.h>
 
 #define MODULE_NAME "tide_kmod"
-#define ALLOWED_START 0x7f4d00000000  // TPU buffer base address
-#define ALLOWED_END   0x7f4d3b9aca00  // TPU buffer end address
+#define ALLOWED_START 0x7f4d00000000
+#define ALLOWED_END   0x7f4d3b9aca00
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Vivek");
@@ -63,14 +63,12 @@ static struct file_operations fops = {
 
 static int __init tide_init(void)
 {
-    // Load eBPF program
     ebpf_prog = bpf_prog_load_xattr(&ebpf_attr, NULL, NULL);
     if (IS_ERR(ebpf_prog)) {
         pr_err("Tide: Failed to load eBPF program\n");
         return PTR_ERR(ebpf_prog);
     }
 
-    // Register character device
     major_num = register_chrdev(0, MODULE_NAME, &fops);
     if (major_num < 0) {
         pr_err("Tide: Failed to register device\n");
