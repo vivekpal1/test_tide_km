@@ -1,12 +1,11 @@
-# eBPF Program Compilation Makefile
+# eBPF Build System for Tide Protocol
 CLANG ?= clang
 LLC ?= llc
-ARCH ?= $(subst x86_64,x86,$(shell uname -m))
+ARCH ?= $(shell uname -m | sed 's/x86_64/x86/')
 KDIR ?= /lib/modules/$(shell uname -r)/build
 BPF_TARGET = bpf
 BIN = tide_kern.o
 
-# Architecture-specific flags
 CLANG_ARCH_FLAGS := -D__TARGET_ARCH_$(ARCH)
 CLANG_FLAGS = -g -O2 -Wall -Werror \
     -target $(BPF_TARGET) \
@@ -27,22 +26,25 @@ CLANG_FLAGS = -g -O2 -Wall -Werror \
     -Wno-tautological-compare \
     -Wno-unknown-warning-option
 
+SRCS = ebpf_probe.c tide_memory.c
+OBJS = $(SRCS:.c=.o)
+BCS = $(SRCS:.c=.bc)
+
 all: $(BIN)
 
-# Compile multiple eBPF C files into single object
-$(BIN): ebpf_probe.c tide_memory.c
-	$(CLANG) $(CLANG_FLAGS) -c $^ -o combined.bc
-	$(LLC) -march=bpf -mcpu=probe -filetype=obj -o $@ combined.bc
-	rm -f combined.bc
+%.bc: %.c
+	$(CLANG) $(CLANG_FLAGS) -emit-llvm -c $< -o $@
+
+combined.bc: $(BCS)
+	llvm-link $^ -o $@
+
+$(BIN): combined.bc
+	$(LLC) -march=bpf -mcpu=probe -filetype=obj -o $@ $<
 
 clean:
-	rm -f $(BIN) *.bc
+	rm -f $(BIN) $(OBJS) $(BCS) *.bc
 
-# Helper targets
 debug:
 	$(CLANG) -S $(CLANG_FLAGS) -c ebpf_probe.c -o - | llvm-mca
 
-vmlinux:
-	bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
-
-.PHONY: all clean debug vmlinux
+.PHONY: all clean debug
